@@ -25,24 +25,52 @@ const SPANISH_NUMBERS: Record<string, number> = {
   'ocho': 8,
   'nueve': 9,
   'diez': 10,
+  'once': 11,
+  'doce': 12,
+  'docena': 12,
+  'trece': 13,
+  'catorce': 14,
+  'quince': 15,
+  'veinte': 20,
   'medio': 0.5,
   'media': 0.5,
   'cuarto': 0.25,
 };
 
+// Remove accents and normalize text for robust audio matching
+const normalizeText = (s: string) => 
+  s.toLowerCase()
+   .normalize('NFD')
+   .replace(/[\u0300-\u036f]/g, '')
+   .trim();
+
 export function parseVoiceInput(text: string, catalog: Product[]): ParsedVoiceCommand {
-  const clean = text.toLowerCase().trim();
+  const clean = normalizeText(text);
 
   if (!clean) {
     return { action: 'unknown', feedbackMessage: 'No se escuchó ningún comando.' };
   }
 
-  // Check actions
-  if (clean.includes('vaciar') || clean.includes('limpiar carrito')) {
+  // Check actions: Clear Cart
+  if (
+    clean.includes('vaciar') || 
+    clean.includes('limpiar') || 
+    clean.includes('borrar') ||
+    clean.includes('cancelar venta')
+  ) {
     return { action: 'clear', feedbackMessage: 'Carrito vaciado' };
   }
 
-  if (clean.includes('cobrar') || clean.includes('pagar') || clean.includes('revisar orden') || clean.includes('total')) {
+  // Check actions: Checkout
+  if (
+    clean.includes('cobrar') || 
+    clean.includes('pagar') || 
+    clean.includes('cuenta') || 
+    clean.includes('total') || 
+    clean.includes('cuanto es') ||
+    clean.includes('cerrar venta') ||
+    clean.includes('finalizar')
+  ) {
     return { action: 'checkout', feedbackMessage: 'Abriendo caja para cobro' };
   }
 
@@ -52,6 +80,8 @@ export function parseVoiceInput(text: string, catalog: Product[]): ParsedVoiceCo
 
   if (clean.includes('kilo') || clean.includes('kg')) {
     unitType = 'kg';
+  } else if (clean.includes('litro') || clean.includes('lt')) {
+    unitType = 'uds';
   }
 
   const words = clean.split(/\s+/);
@@ -69,7 +99,7 @@ export function parseVoiceInput(text: string, catalog: Product[]): ParsedVoiceCo
     }
   }
 
-  // Detect explicit price (e.g. "a 3.50", "a 2 soles", "precio 5")
+  // Detect explicit price (e.g. "a 3.50", "a 2 soles", "precio 5", "costo 1.20")
   let price: number | null = null;
   const priceMatch = clean.match(/(?:a|por|precio|costo)\s+([0-9]+(?:[\.,][0-9]{1,2})?)/);
   if (priceMatch) {
@@ -81,7 +111,7 @@ export function parseVoiceInput(text: string, catalog: Product[]): ParsedVoiceCo
   let highestScore = 0;
 
   for (const product of catalog) {
-    const prodName = product.name.toLowerCase();
+    const prodName = normalizeText(product.name);
     const prodWords = prodName.split(/\s+/);
 
     // Calculate match score
@@ -117,17 +147,17 @@ export function parseVoiceInput(text: string, catalog: Product[]): ParsedVoiceCo
   }
 
   // If not in catalog, treat as ad-hoc custom product entry
-  // Extract clean name by stripping numbers and keywords
+  // Extract clean name by stripping numbers and filler keywords
   const filteredWords = words.filter(w => 
     !SPANISH_NUMBERS[w] && 
     isNaN(Number(w)) && 
-    !['kilo', 'kilos', 'kg', 'soles', 'sol', 'a', 'de', 'un', 'una', 'por', 'precio'].includes(w)
+    !['kilo', 'kilos', 'kg', 'soles', 'sol', 'a', 'de', 'un', 'una', 'por', 'precio', 'costo', 'agrega', 'agregar', 'pon', 'poner', 'dame', 'lleva'].includes(w)
   );
 
   const guessedName = filteredWords.join(' ').trim();
   const finalName = guessedName.length > 1 
     ? guessedName.charAt(0).toUpperCase() + guessedName.slice(1) 
-    : 'Producto Manual';
+    : 'Producto Rápido';
 
   const finalPrice = price !== null && price > 0 ? price : 1.00;
 

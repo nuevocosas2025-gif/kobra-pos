@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-// Test implementation of voice parsing
 const SPANISH_NUMBERS = {
   'un': 1, 'uno': 1, 'una': 1, 'dos': 2, 'tres': 3, 'cuatro': 4,
   'cinco': 5, 'seis': 6, 'siete': 7, 'ocho': 8, 'nueve': 9, 'diez': 10,
@@ -9,10 +8,30 @@ const SPANISH_NUMBERS = {
 };
 
 function parseVoiceInput(text, catalog) {
-  const clean = text.toLowerCase().trim();
+  const clean = text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+
   if (!clean) return { action: 'unknown' };
-  if (clean.includes('vaciar')) return { action: 'clear' };
-  if (clean.includes('cobrar') || clean.includes('pagar')) return { action: 'checkout' };
+  if (
+    clean.includes('vaciar') ||
+    clean.includes('limpiar') ||
+    clean.includes('borrar') ||
+    clean.includes('cancelar venta')
+  ) {
+    return { action: 'clear' };
+  }
+  if (
+    clean.includes('cobrar') ||
+    clean.includes('pagar') ||
+    clean.includes('cuenta') ||
+    clean.includes('total') ||
+    clean.includes('cuanto es')
+  ) {
+    return { action: 'checkout' };
+  }
 
   let quantity = 1;
   let unitType = 'uds';
@@ -37,7 +56,10 @@ function parseVoiceInput(text, catalog) {
   let bestMatch = null;
   let highestScore = 0;
   for (const product of catalog) {
-    const prodName = product.name.toLowerCase();
+    const prodName = product.name
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
     let score = 0;
     if (clean.includes(prodName)) score += 10;
     else {
@@ -64,15 +86,7 @@ function parseVoiceInput(text, catalog) {
     };
   }
 
-  return {
-    action: 'add',
-    customItem: {
-      name: 'Custom',
-      quantity,
-      price: price ?? 1.0,
-      unitType
-    }
-  };
+  return { action: 'add', customItem: { name: 'Ad-hoc', quantity, price: price ?? 1.0, unitType } };
 }
 
 const mockCatalog = [
@@ -97,12 +111,14 @@ test('Voice parser: recognizes weight in kilos', () => {
   assert.equal(res.customItem.unitType, 'kg');
 });
 
-test('Voice parser: recognizes checkout trigger', () => {
-  const res = parseVoiceInput('vamos a cobrar', mockCatalog);
-  assert.equal(res.action, 'checkout');
+test('Voice parser: recognizes checkout trigger with variants', () => {
+  assert.equal(parseVoiceInput('vamos a cobrar', mockCatalog).action, 'checkout');
+  assert.equal(parseVoiceInput('la cuenta por favor', mockCatalog).action, 'checkout');
+  assert.equal(parseVoiceInput('cuánto es', mockCatalog).action, 'checkout');
 });
 
-test('Voice parser: recognizes cart clear trigger', () => {
-  const res = parseVoiceInput('vaciar carrito por favor', mockCatalog);
-  assert.equal(res.action, 'clear');
+test('Voice parser: recognizes cart clear trigger with variants', () => {
+  assert.equal(parseVoiceInput('vaciar carrito por favor', mockCatalog).action, 'clear');
+  assert.equal(parseVoiceInput('cancelar venta', mockCatalog).action, 'clear');
+  assert.equal(parseVoiceInput('limpiar orden', mockCatalog).action, 'clear');
 });

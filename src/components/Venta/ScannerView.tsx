@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Barcode, Camera, Zap, ChevronDown, ChevronUp } from 'lucide-react';
+import { Barcode, Camera, Zap, Power } from 'lucide-react';
 import { RealCameraScanner } from '../Common/RealCameraScanner';
 import { soundEngine } from '../../services/soundEngine';
 
@@ -14,7 +14,8 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
 }) => {
   const [manualCode, setManualCode] = useState('');
   const [showSimModal, setShowSimModal] = useState(false);
-  const [cameraActive, setCameraActive] = useState(true);
+  // Default to FALSE (camera off initially to save battery and allow user to turn on explicitly)
+  const [cameraActive, setCameraActive] = useState(false);
 
   const handleManualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,48 +28,70 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
 
   return (
     <div className="w-full space-y-2">
-      {/* Real Live Camera Barcode Scanner */}
+      {/* Camera Barcode Scanner Section */}
       <div className="relative">
         {cameraActive ? (
-          <RealCameraScanner
-            onScanSuccess={(code) => {
-              onBarcodeDetected(code);
-            }}
-          />
-        ) : (
-          <div className="w-full h-36 rounded-2xl glass-card border border-white/10 flex flex-col items-center justify-center text-slate-400 p-4">
-            <Camera className="w-8 h-8 text-slate-600 mb-1.5" />
-            <p className="text-xs font-semibold text-slate-300">Cámara pausada</p>
+          <div className="space-y-2 animate-fade-in">
+            <RealCameraScanner
+              onScanSuccess={(code) => {
+                onBarcodeDetected(code);
+              }}
+              onClose={() => setCameraActive(false)}
+            />
+
+            {/* Dedicated full-width Turn Off button below video */}
             <button
+              type="button"
+              onClick={() => {
+                soundEngine.playClick();
+                setCameraActive(false);
+              }}
+              className="w-full py-2.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-black flex items-center justify-center gap-2 transition-all active:scale-98 shadow-md"
+            >
+              <Power className="w-4 h-4 text-rose-400 stroke-[2.5]" />
+              <span>Apagar Cámara (Ahorrar Batería)</span>
+            </button>
+          </div>
+        ) : (
+          /* Clean Turn On Camera Panel */
+          <div className="w-full p-3.5 rounded-2xl glass-card border border-white/10 bg-gradient-to-r from-obsidian-900 via-obsidian-900 to-emerald-950/20 flex items-center justify-between shadow-lg">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400 shadow-inner">
+                <Camera className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-white">Escáner de Cámara</span>
+                  <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-slate-800 text-slate-400 font-mono font-medium">
+                    Apagada
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  Prende la cámara solo cuando vayas a escanear
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
               onClick={() => {
                 soundEngine.playClick();
                 setCameraActive(true);
               }}
-              className="mt-2 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-obsidian-950 font-bold text-xs shadow-md active:scale-95"
+              className="px-3.5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-obsidian-950 font-black text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-500/25 active:scale-95 transition-all"
             >
-              Activar Cámara en Vivo
+              <Power className="w-3.5 h-3.5 stroke-[2.5]" />
+              <span>Prender Cámara</span>
             </button>
           </div>
         )}
 
-        {/* Toggle Camera button & Demo button */}
-        <div className="flex items-center justify-between mt-1 px-1">
-          <button
-            type="button"
-            onClick={() => {
-              soundEngine.playClick();
-              setCameraActive(!cameraActive);
-            }}
-            className="text-[10px] font-bold text-slate-400 hover:text-white flex items-center gap-1 transition-colors"
-          >
-            {cameraActive ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            <span>{cameraActive ? 'Minimizar Cámara' : 'Abrir Cámara'}</span>
-          </button>
-
+        {/* Demo button */}
+        <div className="flex items-center justify-end mt-1 px-1">
           <button
             type="button"
             onClick={() => setShowSimModal(true)}
-            className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1"
+            className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 py-0.5"
           >
             <Zap className="w-3 h-3 text-emerald-400" />
             <span>Probar Códigos Demo</span>
@@ -106,6 +129,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
                 Catálogo de Códigos de Barra
               </h3>
               <button
+                type="button"
                 onClick={() => setShowSimModal(false)}
                 className="w-6 h-6 rounded-full bg-white/10 text-slate-400 hover:text-white flex items-center justify-center text-xs"
               >
@@ -119,6 +143,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
               {catalogBarcodes.map((item) => (
                 <button
                   key={item.barcode}
+                  type="button"
                   onClick={() => {
                     soundEngine.playScannerBeep();
                     onBarcodeDetected(item.barcode);

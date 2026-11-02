@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useId } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { Camera, Flashlight, AlertCircle, RefreshCw, X } from 'lucide-react';
+import { Camera, Flashlight, AlertCircle, RefreshCw, Power } from 'lucide-react';
 import { soundEngine } from '../../services/soundEngine';
 
 interface RealCameraScannerProps {
@@ -29,11 +29,28 @@ export const RealCameraScanner: React.FC<RealCameraScannerProps> = ({
     const scanner = new Html5Qrcode(containerId);
     scannerRef.current = scanner;
 
+    const stopAllMediaTracks = () => {
+      try {
+        const el = document.getElementById(containerId);
+        if (el) {
+          const videos = el.querySelectorAll('video');
+          videos.forEach((v) => {
+            const stream = (v as HTMLVideoElement).srcObject as MediaStream | null;
+            if (stream && stream.getTracks) {
+              stream.getTracks().forEach((track) => track.stop());
+            }
+          });
+        }
+      } catch {
+        // Ignore silent cleanup errors
+      }
+    };
+
     const startScanner = async () => {
       try {
         setErrorMessage(null);
         const config = {
-          fps: 12,
+          fps: 15,
           qrbox: { width: 260, height: 130 },
           aspectRatio: 1.777778,
           formatsToSupport: [
@@ -88,9 +105,17 @@ export const RealCameraScanner: React.FC<RealCameraScannerProps> = ({
 
     return () => {
       isMounted = false;
+      stopAllMediaTracks();
       if (scanner.isScanning) {
-        scanner.stop().then(() => scanner.clear()).catch(() => {});
+        scanner.stop().then(() => {
+          stopAllMediaTracks();
+          scanner.clear();
+        }).catch(() => {
+          stopAllMediaTracks();
+          scanner.clear();
+        });
       } else {
+        stopAllMediaTracks();
         scanner.clear();
       }
     };
@@ -114,6 +139,13 @@ export const RealCameraScanner: React.FC<RealCameraScannerProps> = ({
   const switchCamera = () => {
     soundEngine.playClick();
     setIsFrontCamera(!isFrontCamera);
+  };
+
+  const handleClose = () => {
+    soundEngine.playClick();
+    if (onClose) {
+      onClose();
+    }
   };
 
   return (
@@ -170,14 +202,16 @@ export const RealCameraScanner: React.FC<RealCameraScannerProps> = ({
             <RefreshCw className="w-4 h-4" />
           </button>
 
+          {/* Prominent Red Turn-off Button in Top Right */}
           {onClose && (
             <button
               type="button"
-              onClick={onClose}
-              className="w-8 h-8 rounded-xl bg-obsidian-950/80 text-slate-300 hover:text-white border border-white/10 flex items-center justify-center backdrop-blur-md active:scale-90"
-              title="Cerrar escáner"
+              onClick={handleClose}
+              className="px-2.5 py-1 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-[11px] flex items-center gap-1 backdrop-blur-md shadow-lg shadow-rose-600/40 border border-rose-400/40 active:scale-95 transition-all"
+              title="Apagar Cámara"
             >
-              <X className="w-4 h-4" />
+              <Power className="w-3.5 h-3.5" />
+              <span>Apagar</span>
             </button>
           )}
         </div>
@@ -191,14 +225,25 @@ export const RealCameraScanner: React.FC<RealCameraScannerProps> = ({
           <p className="text-[11px] text-slate-400 max-w-[240px] mb-3 leading-relaxed">
             {errorMessage}
           </p>
-          <button
-            type="button"
-            onClick={() => window.location.reload()}
-            className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-obsidian-950 text-xs font-extrabold flex items-center gap-1.5 shadow-md active:scale-95"
-          >
-            <Camera className="w-3.5 h-3.5" />
-            <span>Reintentar Permiso</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-obsidian-950 text-xs font-extrabold flex items-center gap-1.5 shadow-md active:scale-95"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>Reintentar</span>
+            </button>
+            {onClose && (
+              <button
+                type="button"
+                onClick={handleClose}
+                className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold"
+              >
+                Cerrar
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
