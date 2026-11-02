@@ -1,18 +1,22 @@
 import React from 'react';
-import { Volume2, VolumeX, Bell, Store, LogOut } from 'lucide-react';
+import { Volume2, VolumeX, Bell, Store, LogOut, Cloud, CloudOff, RefreshCw } from 'lucide-react';
 import { BusinessProfile, CashShift, UserAccount } from '../../types';
 import { soundEngine } from '../../services/soundEngine';
+import { SyncState } from '../../services/supabaseSync';
 
 interface HeaderProps {
   business: BusinessProfile;
   shift: CashShift;
   currentUser: UserAccount | null;
   lowStockCount: number;
+  syncState: SyncState;
+  pendingSyncCount: number;
   onOpenShiftModal: () => void;
   onOpenNotifications: () => void;
   isMuted: boolean;
   onToggleMute: () => void;
   onOpenSuperAdmin?: () => void;
+  onTriggerManualSync: () => void;
   onLogout: () => void;
 }
 
@@ -21,11 +25,14 @@ export const Header: React.FC<HeaderProps> = ({
   shift,
   currentUser,
   lowStockCount,
+  syncState,
+  pendingSyncCount,
   onOpenShiftModal,
   onOpenNotifications,
   isMuted,
   onToggleMute,
   onOpenSuperAdmin,
+  onTriggerManualSync,
   onLogout
 }) => {
   return (
@@ -73,6 +80,38 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Action icons */}
         <div className="flex items-center gap-1.5">
+          {/* Cloud Sync State Pill */}
+          <button
+            onClick={() => {
+              soundEngine.playClick();
+              onTriggerManualSync();
+            }}
+            className={`px-2 py-1 rounded-lg border text-[10px] font-bold flex items-center gap-1 transition-all active:scale-95 ${
+              syncState === 'online-synced'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                : syncState === 'offline'
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                : 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300'
+            }`}
+            title={
+              syncState === 'online-synced'
+                ? 'Nube Supabase Sincronizada'
+                : syncState === 'offline'
+                ? 'Modo Offline: Operando en memoria local sin internet'
+                : `Sincronizando ${pendingSyncCount} elementos pendientes...`
+            }
+          >
+            {syncState === 'online-synced' && <Cloud className="w-3.5 h-3.5 text-emerald-400" />}
+            {syncState === 'offline' && <CloudOff className="w-3.5 h-3.5 text-amber-400" />}
+            {(syncState === 'syncing' || syncState === 'error') && (
+              <RefreshCw className="w-3.5 h-3.5 text-cyan-400 animate-spin" />
+            )}
+            <span className="hidden sm:inline">
+              {syncState === 'online-synced' ? 'Nube OK' : syncState === 'offline' ? 'Offline' : `Sync (${pendingSyncCount})`}
+            </span>
+          </button>
+
+          {/* Sound Mute Toggle */}
           <button
             onClick={() => {
               onToggleMute();
@@ -84,6 +123,7 @@ export const Header: React.FC<HeaderProps> = ({
             {isMuted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
           </button>
 
+          {/* Stock Notification Bell */}
           <button
             onClick={onOpenNotifications}
             className="relative w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-slate-200 flex items-center justify-center transition-transform active:scale-90"
@@ -97,6 +137,7 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </button>
 
+          {/* Logout Button */}
           <button
             onClick={() => {
               soundEngine.playClick();

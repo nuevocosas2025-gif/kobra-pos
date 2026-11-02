@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   getStoredProducts, saveProducts,
   getStoredTickets, saveTickets,
@@ -10,6 +10,7 @@ import {
   getCurrentUser, logoutUser,
   getStoredTenants, saveTenants
 } from './services/auth';
+import { syncService, SyncState } from './services/supabaseSync';
 import { Product, CartItem, SaleTicket, Debtor, BusinessProfile, CashShift, ActiveTab, UserAccount, TenantStore } from './types';
 import { soundEngine } from './services/soundEngine';
 import { parseVoiceInput } from './services/voiceParser';
@@ -50,6 +51,10 @@ export function App() {
   const [business, setBusiness] = useState<BusinessProfile>(getStoredBusiness);
   const [shift, setShift] = useState<CashShift>(getStoredShift);
 
+  // Sync state
+  const [syncState, setSyncState] = useState<SyncState>(syncService.getSyncState());
+  const [pendingSyncCount, setPendingSyncCount] = useState<number>(syncService.getPendingCount());
+
   // Sub-navigation / Modals
   const [historialSubTab, setHistorialSubTab] = useState<'cuadre' | 'fiados'>('cuadre');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -68,6 +73,37 @@ export function App() {
   useEffect(() => { saveBusiness(business); }, [business]);
   useEffect(() => { saveShift(shift); }, [shift]);
   useEffect(() => { saveTenants(tenants); }, [tenants]);
+
+  // Listen to Supabase sync state
+  useEffect(() => {
+    const unsub = syncService.onStatusChange((st, count) => {
+      setSyncState(st);
+      setPendingSyncCount(count);
+    });
+    return unsub;
+  }, []);
+
+  // Pull latest data from cloud if available
+  const pullCloudData = useCallback(async (storeId: string) => {
+    const cloud = await syncService.pullStoreData(storeId);
+    if (cloud) {
+      if (cloud.products && cloud.products.length > 0) {
+        setProducts(cloud.products);
+      }
+      if (cloud.tickets && cloud.tickets.length > 0) {
+        setTickets(cloud.tickets);
+      }
+      if (cloud.debtors && cloud.debtors.length > 0) {
+        setDebtors(cloud.debtors);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (business.id) {
+      pullCloudData(business.id);
+    }
+  }, [business.id, pullCloudData]);
 
   // Handle Login Success
   const handleLoginSuccess = (user: UserAccount, biz?: BusinessProfile) => {
@@ -201,32 +237,40 @@ export function App() {
     setCart(prev => prev.filter(item => item.product.id !== productId));
   };
 
-  // Complete checkout sale
+  // Complete checkout sale with hybrid auto-sync
   const handleCompleteSale = (ticket: SaleTicket, debtorId?: string) => {
+    // 1. Add ticket locally
     setTickets(prev => [ticket, ...prev]);
 
+    // 2. Reduce stock locally
     setProducts(prev => prev.map(prod => {
       const soldItem = ticket.items.find(it => it.productId === prod.id);
       if (soldItem) {
-        return {
+        const updated = {
           ...prod,
           stock: Math.max(0, Number((prod.stock - soldItem.quantity).toFixed(2)))
         };
+        // Enqueue stock update
+        syncService.enqueue('product_upsert', { ...updated, storeId: business.id });
+        return updated;
       }
       return prod;
     }));
 
+    // 3. If credit sale, update debtor ledger locally
     if (ticket.paymentMethod === 'fiado') {
       if (debtorId && debtorId !== 'new') {
         setDebtors(prev => prev.map(d => {
           if (d.id === debtorId) {
-            return {
+            const updated = {
               ...d,
               totalCredit: Number((d.totalCredit + ticket.total).toFixed(2)),
               currentBalance: Number((d.currentBalance + ticket.total).toFixed(2)),
               lastTicketCode: ticket.ticketNumber,
               updatedAt: new Date().toISOString()
             };
+            syncService.enqueue('debtor_upsert', { ...updated, storeId: business.id });
+            return updated;
           }
           return d;
         }));
@@ -243,24 +287,30 @@ export function App() {
           createdAt: new Date().toISOString()
         };
         setDebtors(prev => [newDebtor, ...prev]);
+        syncService.enqueue('debtor_upsert', { ...newDebtor, storeId: business.id });
       }
     }
+
+    // 4. Enqueue ticket to sync queue (works 100% offline or online)
+    syncService.enqueue('sale_ticket', { ...ticket, storeId: business.id });
 
     setCart([]);
   };
 
-  // Record abono
+  // Record abono with hybrid auto-sync
   const handleRecordAbono = (debtorId: string, amount: number) => {
     setDebtors(prev => prev.map(d => {
       if (d.id === debtorId) {
         const newPaid = Number((d.totalPaid + amount).toFixed(2));
         const newBal = Math.max(0, Number((d.currentBalance - amount).toFixed(2)));
-        return {
+        const updated = {
           ...d,
           totalPaid: newPaid,
           currentBalance: newBal,
           updatedAt: new Date().toISOString()
         };
+        syncService.enqueue('debtor_upsert', { ...updated, storeId: business.id });
+        return updated;
       }
       return d;
     }));
@@ -285,20 +335,23 @@ export function App() {
       customerName: debtor?.name
     };
     setTickets(prev => [abonoTicket, ...prev]);
+    syncService.enqueue('sale_ticket', { ...abonoTicket, storeId: business.id });
   };
 
-  // Adjust stock
+  // Adjust stock with hybrid sync
   const handleAdjustStock = (productId: string, delta: number) => {
     setProducts(prev => prev.map(p => {
       if (p.id === productId) {
         const newStock = Math.max(0, Number((p.stock + delta).toFixed(2)));
-        return { ...p, stock: newStock };
+        const updated = { ...p, stock: newStock };
+        syncService.enqueue('product_upsert', { ...updated, storeId: business.id });
+        return updated;
       }
       return p;
     }));
   };
 
-  // Save product
+  // Save product with hybrid sync
   const handleSaveProduct = (product: Product) => {
     setProducts(prev => {
       const idx = prev.findIndex(p => p.id === product.id);
@@ -309,11 +362,12 @@ export function App() {
       }
       return [product, ...prev];
     });
+    syncService.enqueue('product_upsert', { ...product, storeId: business.id });
     setShowProductModal(false);
     setEditingProduct(null);
   };
 
-  // Save tenant from SuperAdmin
+  // Save tenant from SuperAdmin with hybrid sync
   const handleSaveTenant = (tenant: TenantStore) => {
     setTenants(prev => {
       const idx = prev.findIndex(t => t.id === tenant.id);
@@ -324,7 +378,7 @@ export function App() {
       }
       return [tenant, ...prev];
     });
-    // If the active business is this tenant, update it
+    syncService.enqueue('tenant_upsert', tenant);
     if (business.id === tenant.id) {
       setBusiness(tenant.business);
     }
@@ -369,6 +423,8 @@ export function App() {
         shift={shift}
         currentUser={currentUser}
         lowStockCount={lowStockCount}
+        syncState={syncState}
+        pendingSyncCount={pendingSyncCount}
         onOpenShiftModal={() => setActiveTab('ajustes')}
         onOpenNotifications={() => setActiveTab('inventario')}
         isMuted={isMuted}
@@ -378,6 +434,7 @@ export function App() {
           setIsMuted(next);
         }}
         onOpenSuperAdmin={() => setActiveTab('superadmin')}
+        onTriggerManualSync={() => syncService.processQueue()}
         onLogout={handleLogout}
       />
 
@@ -542,6 +599,7 @@ export function App() {
                     createdAt: new Date().toISOString()
                   };
                   setDebtors(prev => [newDebtor, ...prev]);
+                  syncService.enqueue('debtor_upsert', { ...newDebtor, storeId: business.id });
                 }}
               />
             )}
